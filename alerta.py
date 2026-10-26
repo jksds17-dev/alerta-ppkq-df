@@ -68,7 +68,7 @@ def enviar_alerta(x, y):
         embed_obj["image"] = {"url": map_image_url}
 
     payload = {
-        "content": f"@everyone A Rainha das Aboborinhas Apareceuuuu! 🎃👑\nhttps://www.dfprofiler.com/bossmap\nÁrea: x{x}, y{y}",
+        "content": f"@everyone A Rainha das Aboborinhas Apareceuuuu! 🎃👑\nhttps://www.dfprofiler.com/bossmap\nÁrea: {x} x {y}",
         "embeds": [embed_obj]
     }
     
