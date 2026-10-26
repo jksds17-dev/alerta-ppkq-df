@@ -1,10 +1,9 @@
 import requests
-import json
+import time
 import os
 
 WEBHOOK_URL = 'https://discord.com/api/webhooks/1564227542754263131/Z0tmoKFVN7JHaidxn0SJLv09q3fTPiNbcbC8VRQHga1ul2mhLgPEJfZmAyl_592wDn8T'
 DF_API_URL = 'https://www.dfprofiler.com/bossmap/json/'
-ESTADO_FILE = 'ultimo_alerta.json'
 
 def extrair_coordenadas(dados):
     x, y = "???", "???"
@@ -27,37 +26,32 @@ def extrair_coordenadas(dados):
                 break
     return x, y
 
-def ja_notificado():
-    return os.path.exists(ESTADO_FILE)
-
-def registar_notificacao():
-    with open(ESTADO_FILE, 'w') as f:
-        f.write('notificado')
-
 def verificar_e_notificar():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        resposta = requests.get(DF_API_URL, headers=headers)
+        # Força o bypass do cache enviando o timestamp atual
+        timestamp = int(time.time() * 1000)
+        url_com_timestamp = f"{DF_API_URL}?_={timestamp}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        resposta = requests.get(url_com_timestamp, headers=headers)
+        print(f"Status HTTP recebido: {resposta.status_code}")
+        
         if resposta.status_code != 200:
-            print(f"Erro HTTP {resposta.status_code}")
+            print("Não foi possível carregar os dados da API do DF Profiler.")
             return
             
         dados = resposta.json()
         if 'Pumpkin Queen' in str(dados):
-            if ja_notificado():
-                print("Pumpkin Queen ativa, mas já foi notificada anteriormente.")
-                return
-
             x, y = extrair_coordenadas(dados)
-            print(f"🎃 Boss encontrado na localização: x{x}, y{y}")
+            print(f"🎃 Pumpkin Queen ENCONTRADA! Localização: x{x}, y{y}")
             enviar_alerta(x, y)
-            registar_notificacao()
         else:
-            print("Pumpkin Queen não encontrada no mapa.")
-            if os.path.exists(ESTADO_FILE):
-                os.remove(ESTADO_FILE) # Reseta o estado quando o boss desaparecer
+            print("❌ A Pumpkin Queen NÃO está ativa no mapa neste momento.")
     except Exception as e:
-        print(f"Erro na verificação: {e}")
+        print(f"Erro durante a verificação: {e}")
 
 def enviar_alerta(x, y):
     map_image_url = f"https://deadfrontier.info/w/map/images/Fairview_{x}x{y}.png"
@@ -70,7 +64,8 @@ def enviar_alerta(x, y):
             "image": {"url": map_image_url}
         }]
     }
-    requests.post(WEBHOOK_URL, json=payload)
+    res = requests.post(WEBHOOK_URL, json=payload)
+    print(f"Envio para o Discord concluído com status: {res.status_code}")
 
 if __name__ == '__main__':
     verificar_e_notificar()
