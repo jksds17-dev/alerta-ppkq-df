@@ -143,3 +143,44 @@ def atualizar_dashboard():
             f"⏱️ **Last Checked:** {hora_formatada}\n\n"
             f"**Today's Daily Specials**\n{texto_specials}\n\n"
             f"**Today's Event Bosses**\n{texto_events}"
+        )
+
+        payload = {
+            "embeds": [{
+                "title": "📊 Dead Frontier Live Bossmap Tracker",
+                "url": "https://www.dfprofiler.com/bossmap",
+                "description": descricao,
+                "color": 3447003 # Cor azul estilo dashboard
+            }]
+        }
+
+        # Lógica de edição da mensagem (Webhook Edit)
+        msg_id = estado.get("message_id")
+        
+        if msg_id:
+            # Tenta editar a mensagem já existente
+            url_edit = f"{WEBHOOK_URL}/messages/{msg_id}"
+            res_patch = requests.patch(url_edit, json=payload)
+            
+            if res_patch.status_code == 200:
+                print("Dashboard atualizado com sucesso!")
+                return # Tudo correu bem
+            else:
+                print("A mensagem antiga foi apagada do Discord. A criar uma nova...")
+
+        # Se não existe mensagem ou foi apagada, cria uma nova
+        # O parâmetro ?wait=true diz ao Discord para devolver o ID da nova mensagem gerada
+        url_post = f"{WEBHOOK_URL}?wait=true"
+        res_post = requests.post(url_post, json=payload)
+        
+        if res_post.status_code in [200, 201]:
+            dados_msg = res_post.json()
+            estado["message_id"] = dados_msg["id"]
+            salvar_estado(estado)
+            print("Novo Dashboard criado com sucesso!")
+
+    except Exception as e:
+        print(f"Erro: {e}")
+
+if __name__ == '__main__':
+    atualizar_dashboard()
