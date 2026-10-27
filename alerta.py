@@ -7,23 +7,22 @@ import os
 WEBHOOK_URL = 'https://discord.com/api/webhooks/1564227542754263131/Z0tmoKFVN7JHaidxn0SJLv09q3fTPiNbcbC8VRQHga1ul2mhLgPEJfZmAyl_592wDn8T'
 ESTADO_FILE = 'estado_bosses.json'
 
-# Coordenadas Exatas das Bases (Calibradas)
 BASES = {
-    'SB': (1054, 987),   # Secronom Bunker (S)
-    'N':  (1048, 1048),  # Nastya's Holdout (N)
-    'D':  (927, 1025),   # Dogg's Stockade (D)
-    'P':  (972, 927),    # Precinct 13 (P)
-    'F':  (1115, 966),   # Fort Pastor (F)
-    'Z':  (1058, 1019)   # Ground Zero / Zone 21 (Z) - Calibrado
+    'SB': (1054, 987),
+    'N':  (1048, 1048),
+    'D':  (927, 1025),
+    'P':  (972, 927),
+    'F':  (1115, 966),
+    'Z':  (1058, 1019)
 }
 
-# Configuração dos Bosses a monitorizar
+# Configuração com a opção de ligar/desligar a distância relativa
 ALVOS = {
-    "Pumpkin Queen": {"base_ref": "SB", "emoji": "🎃", "cor": 16744192, "titulo": "A Rainha das Aboborinhas"},
-    "Behemoth": {"base_ref": "Z", "emoji": "🦍", "cor": 8388736, "titulo": "Behemoth"},
-    "Devil Hound": {"base_ref": "SB", "emoji": "🐺", "cor": 16711680, "titulo": "Devil Hound"},
-    "8 x Bandits": {"base_ref": "SB", "emoji": "🥷", "cor": 0, "titulo": "8 Bandits"},
-    "Volatile Leaper": {"base_ref": "P", "emoji": "🐸", "cor": 32768, "titulo": "Volatile Leaper"}
+    "Pumpkin Queen": {"base_ref": "SB", "emoji": "🎃", "cor": 16744192, "titulo": "A Rainha das Aboborinhas", "mostrar_distancia": True},
+    "Behemoth": {"base_ref": "Z", "emoji": "🦍", "cor": 8388736, "titulo": "Behemoth", "mostrar_distancia": True},
+    "Devil Hound": {"base_ref": "SB", "emoji": "🐺", "cor": 16711680, "titulo": "Devil Hound", "mostrar_distancia": True},
+    "8 x Bandits": {"base_ref": "SB", "emoji": "🥷", "cor": 0, "titulo": "8 Bandits", "mostrar_distancia": True},
+    "Volatile Leaper": {"base_ref": "P", "emoji": "🐸", "cor": 32768, "titulo": "Volatile Leaper", "mostrar_distancia": False} # Distância desligada
 }
 
 def calcular_distancia_base(bx, by, base_sigla):
@@ -33,7 +32,6 @@ def calcular_distancia_base(bx, by, base_sigla):
     x, y = int(bx), int(by)
     base_x, base_y = BASES.get(base_sigla, BASES['SB'])
     
-    # Matemática invertida padrão do Dead Frontier (Base - Boss)
     diff_x = base_x - x
     diff_y = base_y - y
     
@@ -41,10 +39,7 @@ def calcular_distancia_base(bx, by, base_sigla):
     dir_y = f"{abs(diff_y)}D" if diff_y > 0 else (f"{abs(diff_y)}U" if diff_y < 0 else "")
     
     posicao = f"{dir_x}{dir_y}".strip()
-    if not posicao:
-        posicao = "No mesmo bloco"
-        
-    return f"{posicao} de {base_sigla}"
+    return f"{posicao} de {base_sigla}" if posicao else "No mesmo bloco"
 
 def extrair_dados_alvo(dados, nome_alvo):
     json_str = json.dumps(dados)
@@ -53,19 +48,19 @@ def extrair_dados_alvo(dados, nome_alvo):
     if idx == -1:
         return "???", "???", False
 
-    trecho = json_str[max(0, idx-200):min(len(json_str), idx+200)]
+    # Raio de visão curto para não misturar coordenadas de bosses diferentes
+    trecho_antes = json_str[max(0, idx-100):idx]
+    trecho_total = json_str[max(0, idx-100):min(len(json_str), idx+150)]
     
-    # Deteta Boss Inativo/Verde
     esta_ativo = True
-    if 'green' in trecho.lower() or 'expired' in trecho.lower() or 'active":false' in trecho.replace(" ", ""):
+    if 'green' in trecho_total.lower() or 'expired' in trecho_total.lower() or 'active":false' in trecho_total.replace(" ", ""):
         esta_ativo = False
 
-    texto_antes = json_str[0:idx]
-    chaves_coords = re.findall(r'"(\d{3,4})[x_](\d{3,4})"', texto_antes)
+    chaves_coords = re.findall(r'"(\d{3,4})[x_](\d{3,4})"', trecho_antes)
     if chaves_coords:
         return chaves_coords[-1][0], chaves_coords[-1][1], esta_ativo
 
-    padrao_xy = re.search(r'"x"\s*:\s*"?(\d{3,4})"?,?\s*"y"\s*:\s*"?(\d{3,4})"?', trecho)
+    padrao_xy = re.search(r'"x"\s*:\s*"?(\d{3,4})"?,?\s*"y"\s*:\s*"?(\d{3,4})"?', trecho_total)
     if padrao_xy:
         return padrao_xy.group(1), padrao_xy.group(2), esta_ativo
 
@@ -121,7 +116,6 @@ def verificar_e_notificar():
             distancia_ref = calcular_distancia_base(x, y, config['base_ref'])
             loc_atual = f"{x}x{y}"
 
-            # 1º Alerta: Ao Spawnar
             if not estado[nome_alvo]["alertado_inicio"] or estado[nome_alvo]["ultima_loc"] != loc_atual:
                 enviar_alerta(nome_alvo, x, y, distancia_ref, config, tipo="inicio")
                 estado[nome_alvo]["alertado_inicio"] = True
@@ -130,7 +124,6 @@ def verificar_e_notificar():
                 estado[nome_alvo]["ultima_loc"] = loc_atual
                 estado_modificado = True
 
-            # 2º Alerta: Após 1 Hora (3600 seg)
             elif estado[nome_alvo]["alertado_inicio"] and not estado[nome_alvo]["alertado_1h"]:
                 if (agora - estado[nome_alvo]["tempo_inicio"]) >= 3600:
                     enviar_alerta(nome_alvo, x, y, distancia_ref, config, tipo="1hora")
@@ -144,18 +137,23 @@ def verificar_e_notificar():
         print(f"Erro: {e}")
 
 def enviar_alerta(nome_alvo, x, y, distancia_str, config, tipo="inicio"):
-    map_image_url = f"https://deadfrontier.info/w/map/images/Fairview_{x}x{y}.png" if x != "???" else ""
-    
     acao = "Apareceuuuu!" if tipo == "inicio" else "continua ativo! (1 Hora decorrida)"
     titulo = f"{config['titulo']} {acao}"
     
+    # Formata a mensagem com base na configuração 'mostrar_distancia'
+    if config['mostrar_distancia']:
+        texto_area = f"Área: {x}x{y} ({distancia_str})"
+        desc_alerta = f"Localização relativa: **{distancia_str}**\nClique no link acima para abrir o mapa interativo."
+    else:
+        texto_area = f"Área: {x}x{y}"
+        desc_alerta = "Clique no link acima para abrir o mapa interativo."
+    
     payload = {
-        "content": f"@everyone {titulo} {config['emoji']}\nhttps://www.dfprofiler.com/bossmap\nÁrea: {x}x{y} ({distancia_str})",
+        "content": f"@everyone {titulo} {config['emoji']}\nhttps://www.dfprofiler.com/bossmap\n{texto_area}",
         "embeds": [{
             "title": "Bossmap - Profiler",
-            "description": f"Localização relativa: **{distancia_str}**",
-            "color": config['cor'] if tipo == "inicio" else 16744192,
-            "image": {"url": map_image_url} if map_image_url else {}
+            "description": desc_alerta,
+            "color": config['cor'] if tipo == "inicio" else 16744192
         }]
     }
     requests.post(WEBHOOK_URL, json=payload)
