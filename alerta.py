@@ -21,64 +21,67 @@ ALVOS = {
     "Behemoth": {"base_ref": "Z", "emoji": "🦍", "cor": 8388736, "titulo": "Behemoth", "mostrar_distancia": True},
     "Devil Hound": {"base_ref": "SB", "emoji": "🐺", "cor": 16711680, "titulo": "Devil Hound", "mostrar_distancia": True},
     "8 x Bandits": {"base_ref": "SB", "emoji": "🥷", "cor": 0, "titulo": "8 Bandits", "mostrar_distancia": True},
-    "Volatile Leaper": {"base_ref": "P", "emoji": "🐸", "cor": 32768, "titulo": "Volatile Leaper", "mostrar_distancia": False}
+    "Volatile Leaper": {"base_ref": "P", "emoji": "🐸", "cor": 32768, "titulo": "Volatile Leaper", "mostrar_distancia": False} # Sem distância!
 }
 
 def calcular_distancia_base(bx, by, base_sigla):
     if bx == "???" or by == "???":
-        return "Localização desconhecida"
+        return ""
     
     x, y = int(bx), int(by)
     base_x, base_y = BASES.get(base_sigla, BASES['SB'])
     
-    # Matemática Correta: Boss - Base
     diff_x = x - base_x
     diff_y = y - base_y
     
-    # Eixo X: Positivo é Direita (R), Negativo é Esquerda (L)
     dir_x = f"{abs(diff_x)}R" if diff_x > 0 else (f"{abs(diff_x)}L" if diff_x < 0 else "")
-    # Eixo Y: Positivo é Baixo (D), Negativo é Cima (U)
     dir_y = f"{abs(diff_y)}D" if diff_y > 0 else (f"{abs(diff_y)}U" if diff_y < 0 else "")
     
     posicao = f"{dir_x}{dir_y}".strip()
     return f"{posicao} de {base_sigla}" if posicao else "No mesmo bloco"
 
 def extrair_dados_alvo(dados, nome_alvo):
-    # 1. Busca Estruturada (Garante que a coordenada pertence EXATAMENTE a este boss)
-    if isinstance(dados, dict):
-        for k, v in dados.items():
-            # Verifica se a chave é uma coordenada (ex: "1054_995")
-            if re.match(r'^\d{3,4}[x_]\d{3,4}$', str(k)):
-                if nome_alvo in str(v):
-                    partes = str(k).replace('_', 'x').split('x')
-                    trecho = str(v).lower()
-                    esta_ativo = not ('green' in trecho or 'expired' in trecho or '"active":false' in trecho.replace(" ", ""))
-                    return partes[0], partes[1], esta_ativo
-                    
-        # Se os blocos estiverem dentro de um sub-dicionário
-        for k, v in dados.items():
-            if isinstance(v, dict):
-                for sub_k, sub_v in v.items():
-                    if re.match(r'^\d{3,4}[x_]\d{3,4}$', str(sub_k)):
-                        if nome_alvo in str(sub_v):
-                            partes = str(sub_k).replace('_', 'x').split('x')
-                            trecho = str(sub_v).lower()
-                            esta_ativo = not ('green' in trecho or 'expired' in trecho or '"active":false' in trecho.replace(" ", ""))
-                            return partes[0], partes[1], esta_ativo
-
-    # 2. Fallback (Caso de emergência se a estrutura do site mudar)
-    json_str = json.dumps(dados)
-    idx = json_str.find(nome_alvo)
-    if idx != -1:
-        trecho_total = json_str[max(0, idx-150):min(len(json_str), idx+150)]
-        esta_ativo = not ('green' in trecho_total.lower() or 'expired' in trecho_total.lower() or '"active":false' in trecho_total.replace(" ", ""))
+    # Nova busca de alta precisão (Impede roubo de coordenadas vizinhas)
+    encontrado_x, encontrado_y, esta_ativo = "???", "???", False
+    
+    def iterar_nos(no, chave_pai=None):
+        nonlocal encontrado_x, encontrado_y, esta_ativo
         
-        texto_antes = json_str[:idx]
-        chaves_coords = re.findall(r'"(\d{3,4})[x_](\d{3,4})"', texto_antes)
-        if chaves_coords:
-            return chaves_coords[-1][0], chaves_coords[-1][1], esta_ativo
+        if isinstance(no, dict):
+            texto_no = json.dumps(no)
+            if nome_alvo in texto_no:
+                # Checa inatividade apenas no contexto local deste boss
+                ativo = not ('green' in texto_no.lower() or 'expired' in texto_no.lower() or '"active": false' in texto_no.lower() or '"active":false' in texto_no.lower())
+                
+                # 1. Tenta x e y explícitos
+                if 'x' in no and 'y' in no:
+                    encontrado_x, encontrado_y, esta_ativo = str(no['x']), str(no['y']), ativo
+                    return True
+                
+                # 2. Se a chave "gaveta" pai for a coordenada
+                if chave_pai and re.match(r'^\d{3,4}[x_]\d{3,4}$', str(chave_pai)):
+                    partes = str(chave_pai).replace('_', 'x').split('x')
+                    encontrado_x, encontrado_y, esta_ativo = partes[0], partes[1], ativo
+                    return True
+                    
+                # 3. Procura chaves filhas que sejam coordenadas
+                for k, v in no.items():
+                    if nome_alvo in str(v) and re.match(r'^\d{3,4}[x_]\d{3,4}$', str(k)):
+                        partes = str(k).replace('_', 'x').split('x')
+                        encontrado_x, encontrado_y, esta_ativo = partes[0], partes[1], ativo
+                        return True
+                        
+            for k, v in no.items():
+                if iterar_nos(v, k):
+                    return True
+        elif isinstance(no, list):
+            for item in no:
+                if iterar_nos(item, chave_pai):
+                    return True
+        return False
 
-    return "???", "???", False
+    iterar_nos(dados)
+    return encontrado_x, encontrado_y, esta_ativo
 
 def carregar_estado():
     if os.path.exists(ESTADO_FILE):
@@ -154,10 +157,12 @@ def enviar_alerta(nome_alvo, x, y, distancia_str, config, tipo="inicio"):
     acao = "Apareceuuuu!" if tipo == "inicio" else "continua ativo! (1 Hora decorrida)"
     titulo = f"{config['titulo']} {acao}"
     
-    if config['mostrar_distancia']:
+    # Valida a configuração mostrar_distancia
+    if config['mostrar_distancia'] and distancia_str:
         texto_area = f"Área: {x}x{y} ({distancia_str})"
         desc_alerta = f"Localização relativa: **{distancia_str}**\nClique no link acima para abrir o mapa interativo."
     else:
+        # Volatile Leaper cairá aqui (sem a distância extra)
         texto_area = f"Área: {x}x{y}"
         desc_alerta = "Clique no link acima para abrir o mapa interativo."
     
@@ -167,6 +172,7 @@ def enviar_alerta(nome_alvo, x, y, distancia_str, config, tipo="inicio"):
             "title": "Bossmap - Profiler",
             "description": desc_alerta,
             "color": config['cor'] if tipo == "inicio" else 16744192
+            # A imagem foi 100% removida daqui!
         }]
     }
     requests.post(WEBHOOK_URL, json=payload)
