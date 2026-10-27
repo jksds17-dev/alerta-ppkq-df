@@ -16,13 +16,12 @@ BASES = {
     'Z':  (1058, 1019)
 }
 
-# Configuração com a opção de ligar/desligar a distância relativa
 ALVOS = {
     "Pumpkin Queen": {"base_ref": "SB", "emoji": "🎃", "cor": 16744192, "titulo": "A Rainha das Aboborinhas", "mostrar_distancia": True},
     "Behemoth": {"base_ref": "Z", "emoji": "🦍", "cor": 8388736, "titulo": "Behemoth", "mostrar_distancia": True},
     "Devil Hound": {"base_ref": "SB", "emoji": "🐺", "cor": 16711680, "titulo": "Devil Hound", "mostrar_distancia": True},
     "8 x Bandits": {"base_ref": "SB", "emoji": "🥷", "cor": 0, "titulo": "8 Bandits", "mostrar_distancia": True},
-    "Volatile Leaper": {"base_ref": "P", "emoji": "🐸", "cor": 32768, "titulo": "Volatile Leaper", "mostrar_distancia": False} # Distância desligada
+    "Volatile Leaper": {"base_ref": "P", "emoji": "🐸", "cor": 32768, "titulo": "Volatile Leaper", "mostrar_distancia": False}
 }
 
 def calcular_distancia_base(bx, by, base_sigla):
@@ -32,39 +31,54 @@ def calcular_distancia_base(bx, by, base_sigla):
     x, y = int(bx), int(by)
     base_x, base_y = BASES.get(base_sigla, BASES['SB'])
     
-    diff_x = base_x - x
-    diff_y = base_y - y
+    # Matemática Correta: Boss - Base
+    diff_x = x - base_x
+    diff_y = y - base_y
     
+    # Eixo X: Positivo é Direita (R), Negativo é Esquerda (L)
     dir_x = f"{abs(diff_x)}R" if diff_x > 0 else (f"{abs(diff_x)}L" if diff_x < 0 else "")
+    # Eixo Y: Positivo é Baixo (D), Negativo é Cima (U)
     dir_y = f"{abs(diff_y)}D" if diff_y > 0 else (f"{abs(diff_y)}U" if diff_y < 0 else "")
     
     posicao = f"{dir_x}{dir_y}".strip()
     return f"{posicao} de {base_sigla}" if posicao else "No mesmo bloco"
 
 def extrair_dados_alvo(dados, nome_alvo):
+    # 1. Busca Estruturada (Garante que a coordenada pertence EXATAMENTE a este boss)
+    if isinstance(dados, dict):
+        for k, v in dados.items():
+            # Verifica se a chave é uma coordenada (ex: "1054_995")
+            if re.match(r'^\d{3,4}[x_]\d{3,4}$', str(k)):
+                if nome_alvo in str(v):
+                    partes = str(k).replace('_', 'x').split('x')
+                    trecho = str(v).lower()
+                    esta_ativo = not ('green' in trecho or 'expired' in trecho or '"active":false' in trecho.replace(" ", ""))
+                    return partes[0], partes[1], esta_ativo
+                    
+        # Se os blocos estiverem dentro de um sub-dicionário
+        for k, v in dados.items():
+            if isinstance(v, dict):
+                for sub_k, sub_v in v.items():
+                    if re.match(r'^\d{3,4}[x_]\d{3,4}$', str(sub_k)):
+                        if nome_alvo in str(sub_v):
+                            partes = str(sub_k).replace('_', 'x').split('x')
+                            trecho = str(sub_v).lower()
+                            esta_ativo = not ('green' in trecho or 'expired' in trecho or '"active":false' in trecho.replace(" ", ""))
+                            return partes[0], partes[1], esta_ativo
+
+    # 2. Fallback (Caso de emergência se a estrutura do site mudar)
     json_str = json.dumps(dados)
     idx = json_str.find(nome_alvo)
-    
-    if idx == -1:
-        return "???", "???", False
+    if idx != -1:
+        trecho_total = json_str[max(0, idx-150):min(len(json_str), idx+150)]
+        esta_ativo = not ('green' in trecho_total.lower() or 'expired' in trecho_total.lower() or '"active":false' in trecho_total.replace(" ", ""))
+        
+        texto_antes = json_str[:idx]
+        chaves_coords = re.findall(r'"(\d{3,4})[x_](\d{3,4})"', texto_antes)
+        if chaves_coords:
+            return chaves_coords[-1][0], chaves_coords[-1][1], esta_ativo
 
-    # Raio de visão curto para não misturar coordenadas de bosses diferentes
-    trecho_antes = json_str[max(0, idx-100):idx]
-    trecho_total = json_str[max(0, idx-100):min(len(json_str), idx+150)]
-    
-    esta_ativo = True
-    if 'green' in trecho_total.lower() or 'expired' in trecho_total.lower() or 'active":false' in trecho_total.replace(" ", ""):
-        esta_ativo = False
-
-    chaves_coords = re.findall(r'"(\d{3,4})[x_](\d{3,4})"', trecho_antes)
-    if chaves_coords:
-        return chaves_coords[-1][0], chaves_coords[-1][1], esta_ativo
-
-    padrao_xy = re.search(r'"x"\s*:\s*"?(\d{3,4})"?,?\s*"y"\s*:\s*"?(\d{3,4})"?', trecho_total)
-    if padrao_xy:
-        return padrao_xy.group(1), padrao_xy.group(2), esta_ativo
-
-    return "???", "???", esta_ativo
+    return "???", "???", False
 
 def carregar_estado():
     if os.path.exists(ESTADO_FILE):
@@ -110,7 +124,7 @@ def verificar_e_notificar():
 
             x, y, esta_ativo = extrair_dados_alvo(dados, nome_alvo)
             
-            if not esta_ativo:
+            if not esta_ativo or x == "???":
                 continue
 
             distancia_ref = calcular_distancia_base(x, y, config['base_ref'])
@@ -140,7 +154,6 @@ def enviar_alerta(nome_alvo, x, y, distancia_str, config, tipo="inicio"):
     acao = "Apareceuuuu!" if tipo == "inicio" else "continua ativo! (1 Hora decorrida)"
     titulo = f"{config['titulo']} {acao}"
     
-    # Formata a mensagem com base na configuração 'mostrar_distancia'
     if config['mostrar_distancia']:
         texto_area = f"Área: {x}x{y} ({distancia_str})"
         desc_alerta = f"Localização relativa: **{distancia_str}**\nClique no link acima para abrir o mapa interativo."
