@@ -1,120 +1,83 @@
 import requests
 import time
-import datetime
 import json
 import re
 import os
 
 WEBHOOK_URL = 'https://discord.com/api/webhooks/1564227542754263131/Z0tmoKFVN7JHaidxn0SJLv09q3fTPiNbcbC8VRQHga1ul2mhLgPEJfZmAyl_592wDn8T'
-ESTADO_FILE = 'estado_dashboard.json'
+ESTADO_FILE = 'estado_boss.json'
 
+# Coordenadas Exatas das Bases (Calibradas)
 BASES = {
-    'SB': (1054, 987),
-    'N':  (1048, 1048),
-    'D':  (927, 1025),
-    'P':  (972, 927),
-    'F':  (1115, 966),
-    'Z':  (1058, 1019)
+    'SB': (1054, 987),  # Secronom Bunker (S) calibrado
+    'N':  (1048, 1048), # Nastya's Holdout (N)
+    'D':  (927, 1025),  # Dogg's Stockade (D)
+    'P':  (972, 927),   # Precinct 13 (P)
+    'F':  (1115, 966)   # Fort Pastor (F)
 }
 
-# Organização por categorias para o Dashboard
-CATEGORIAS = {
-    "Daily Specials": [
-        {"nome": "Volatile Leaper", "base": "P"},
-        {"nome": "Behemoth", "base": "Z"},
-        {"nome": "Devil Hound", "base": "SB"},
-        {"nome": "8 x Bandits", "base": "SB"}
-    ],
-    "Event Bosses": [
-        {"nome": "Pumpkin Queen", "base": "SB"}
-    ]
-}
-
-def calcular_distancia_base(bx, by, base_sigla):
+def calcular_distancia_base(bx, by, base_sigla='SB'):
     if bx == "???" or by == "???":
-        return ""
+        return "Localização desconhecida"
+    
     x, y = int(bx), int(by)
     base_x, base_y = BASES.get(base_sigla, BASES['SB'])
     
-    diff_x = x - base_x
-    diff_y = y - base_y
+    # Matemática invertida para bater com o padrão do jogo (Base - Boss)
+    diff_x = base_x - x
+    diff_y = base_y - y
     
     dir_x = f"{abs(diff_x)}R" if diff_x > 0 else (f"{abs(diff_x)}L" if diff_x < 0 else "")
     dir_y = f"{abs(diff_y)}D" if diff_y > 0 else (f"{abs(diff_y)}U" if diff_y < 0 else "")
     
+    # Formata como "2R5D de SB"
     posicao = f"{dir_x}{dir_y}".strip()
-    return f"{posicao} de {base_sigla}" if posicao else "No mesmo bloco"
+    if not posicao:
+        posicao = "No mesmo bloco"
+        
+    return f"{posicao} de {base_sigla}"
 
-def extrair_dados_alvo(dados, nome_alvo):
-    # Função de alta precisão baseada em árvore (gavetas independentes)
-    encontrado_x, encontrado_y, esta_ativo = "???", "???", False
+def extrair_dados_boss(dados):
+    json_str = json.dumps(dados)
+    idx = json_str.find('Pumpkin Queen')
     
-    def iterar_nos(no, chave_pai=None):
-        nonlocal encontrado_x, encontrado_y, esta_ativo
-        if isinstance(no, dict):
-            texto_no = json.dumps(no)
-            if nome_alvo in texto_no:
-                ativo = not ('green' in texto_no.lower() or 'expired' in texto_no.lower() or '"active": false' in texto_no.lower() or '"active":false' in texto_no.lower())
-                
-                if 'x' in no and 'y' in no:
-                    encontrado_x, encontrado_y, esta_ativo = str(no['x']), str(no['y']), ativo
-                    return True
-                if chave_pai and re.match(r'^\d{3,4}[x_]\d{3,4}$', str(chave_pai)):
-                    partes = str(chave_pai).replace('_', 'x').split('x')
-                    encontrado_x, encontrado_y, esta_ativo = partes[0], partes[1], ativo
-                    return True
-                for k, v in no.items():
-                    if nome_alvo in str(v) and re.match(r'^\d{3,4}[x_]\d{3,4}$', str(k)):
-                        partes = str(k).replace('_', 'x').split('x')
-                        encontrado_x, encontrado_y, esta_ativo = partes[0], partes[1], ativo
-                        return True
-            for k, v in no.items():
-                if iterar_nos(v, k): return True
-        elif isinstance(no, list):
-            for item in no:
-                if iterar_nos(item, chave_pai): return True
-        return False
+    if idx == -1:
+        return "???", "???", False
 
-    iterar_nos(dados)
-    return encontrado_x, encontrado_y, esta_ativo
+    trecho = json_str[max(0, idx-200):min(len(json_str), idx+200)]
+    
+    # Deteta Boss Inativo/Verde (Tempo Esgotado)
+    esta_ativo = True
+    if 'green' in trecho.lower() or 'expired' in trecho.lower() or 'active":false' in trecho.replace(" ", ""):
+        esta_ativo = False
+
+    texto_antes = json_str[0:idx]
+    chaves_coords = re.findall(r'"(\d{3,4})[x_](\d{3,4})"', texto_antes)
+    if chaves_coords:
+        return chaves_coords[-1][0], chaves_coords[-1][1], esta_ativo
+
+    padrao_xy = re.search(r'"x"\s*:\s*"?(\d{3,4})"?,?\s*"y"\s*:\s*"?(\d{3,4})"?', trecho)
+    if padrao_xy:
+        return padrao_xy.group(1), padrao_xy.group(2), esta_ativo
+
+    return "???", "???", esta_ativo
 
 def carregar_estado():
     if os.path.exists(ESTADO_FILE):
         try:
             with open(ESTADO_FILE, 'r') as f:
-                estado = json.load(f)
-                if "message_id" in estado:
-                    return estado
+                return json.load(f)
         except:
             pass
-    return {"message_id": None}
+    return {"alertado_inicio": False, "alertado_1h": False, "tempo_inicio": 0, "ultima_loc": ""}
 
 def salvar_estado(estado):
     with open(ESTADO_FILE, 'w') as f:
         json.dump(estado, f)
 
-def formatar_linha(boss_info, dados_api):
-    nome = boss_info["nome"]
-    base = boss_info["base"]
-    
-    # Se o nome não existir de todo no JSON
-    if nome not in str(dados_api):
-        return f"❌ **{nome}**"
-        
-    x, y, esta_ativo = extrair_dados_alvo(dados_api, nome)
-    
-    if not esta_ativo or x == "???":
-        return f"❌ **{nome}**"
-        
-    distancia = calcular_distancia_base(x, y, base)
-    if distancia:
-        return f"✅ **{nome}** — spotted: {x}x{y} ({distancia})"
-    else:
-        return f"✅ **{nome}** — spotted: {x}x{y}"
-
-def atualizar_dashboard():
+def verificar_e_notificar():
     timestamp = int(time.time() * 1000)
-    url_api = f"https://www.dfprofiler.com/bossmap/json/?_={timestamp}"
+    url = f"https://www.dfprofiler.com/bossmap/json/?_={timestamp}"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Referer': 'https://www.dfprofiler.com/bossmap',
@@ -122,65 +85,60 @@ def atualizar_dashboard():
     }
     
     try:
-        resposta = requests.get(url_api, headers=headers, timeout=10)
+        resposta = requests.get(url, headers=headers, timeout=10)
         if resposta.status_code != 200:
-            print("Erro ao aceder à API do DF Profiler.")
             return
             
         dados = resposta.json()
+        if 'Pumpkin Queen' not in str(dados):
+            if os.path.exists(ESTADO_FILE):
+                os.remove(ESTADO_FILE)
+            return
+
+        x, y, esta_ativo = extrair_dados_boss(dados)
+        
+        if not esta_ativo:
+            print("🟢 Pumpkin Queen está visível, mas INATIVA/VERDE no código. Alerta bloqueado.")
+            return
+
         estado = carregar_estado()
-        
-        # Calcular a hora atual no fuso horário do Brasil (UTC-3)
-        agora_utc = datetime.datetime.utcnow()
-        agora_br = agora_utc - datetime.timedelta(hours=3)
-        hora_formatada = agora_br.strftime('%d/%m/%Y às %H:%M:%S')
+        agora = time.time()
+        distancia_sb = calcular_distancia_base(x, y, 'SB')
+        loc_atual = f"{x}x{y}"
 
-        # Construir o texto das secções
-        texto_specials = "\n".join([formatar_linha(b, dados) for b in CATEGORIAS["Daily Specials"]])
-        texto_events = "\n".join([formatar_linha(b, dados) for b in CATEGORIAS["Event Bosses"]])
-
-        descricao = (
-            f"⏱️ **Last Checked:** {hora_formatada}\n\n"
-            f"**Today's Daily Specials**\n{texto_specials}\n\n"
-            f"**Today's Event Bosses**\n{texto_events}"
-        )
-
-        payload = {
-            "embeds": [{
-                "title": "📊 Dead Frontier Live Bossmap Tracker",
-                "url": "https://www.dfprofiler.com/bossmap",
-                "description": descricao,
-                "color": 3447003 # Cor azul estilo dashboard
-            }]
-        }
-
-        # Lógica de edição da mensagem (Webhook Edit)
-        msg_id = estado.get("message_id")
-        
-        if msg_id:
-            # Tenta editar a mensagem já existente
-            url_edit = f"{WEBHOOK_URL}/messages/{msg_id}"
-            res_patch = requests.patch(url_edit, json=payload)
-            
-            if res_patch.status_code == 200:
-                print("Dashboard atualizado com sucesso!")
-                return # Tudo correu bem
-            else:
-                print("A mensagem antiga foi apagada do Discord. A criar uma nova...")
-
-        # Se não existe mensagem ou foi apagada, cria uma nova
-        # O parâmetro ?wait=true diz ao Discord para devolver o ID da nova mensagem gerada
-        url_post = f"{WEBHOOK_URL}?wait=true"
-        res_post = requests.post(url_post, json=payload)
-        
-        if res_post.status_code in [200, 201]:
-            dados_msg = res_post.json()
-            estado["message_id"] = dados_msg["id"]
+        # 1º Alerta: Ao Spawnar
+        if not estado["alertado_inicio"] or estado["ultima_loc"] != loc_atual:
+            enviar_alerta(x, y, distancia_sb, tipo="inicio")
+            estado["alertado_inicio"] = True
+            estado["alertado_1h"] = False
+            estado["tempo_inicio"] = agora
+            estado["ultima_loc"] = loc_atual
             salvar_estado(estado)
-            print("Novo Dashboard criado com sucesso!")
+
+        # 2º Alerta: Após 1 Hora (3600 seg)
+        elif estado["alertado_inicio"] and not estado["alertado_1h"]:
+            if (agora - estado["tempo_inicio"]) >= 3600:
+                enviar_alerta(x, y, distancia_sb, tipo="1hora")
+                estado["alertado_1h"] = True
+                salvar_estado(estado)
 
     except Exception as e:
         print(f"Erro: {e}")
 
+def enviar_alerta(x, y, distancia_str, tipo="inicio"):
+    map_image_url = f"https://deadfrontier.info/w/map/images/Fairview_{x}x{y}.png" if x != "???" else ""
+    titulo = "🎃 A Rainha das Aboborinhas Apareceuuuu!" if tipo == "inicio" else "⏰ A Rainha das Aboborinhas continua ativa! (1 Hora decorrida)"
+    
+    payload = {
+        "content": f"@everyone {titulo} 🎃👑\nhttps://www.dfprofiler.com/bossmap\nÁrea: {x}x{y} ({distancia_str})",
+        "embeds": [{
+            "title": "Bossmap - Profiler",
+            "description": f"Localização relativa: **{distancia_str}**",
+            "color": 16711680 if tipo == "inicio" else 16744192,
+            "image": {"url": map_image_url} if map_image_url else {}
+        }]
+    }
+    requests.post(WEBHOOK_URL, json=payload)
+
 if __name__ == '__main__':
-    atualizar_dashboard()
+    verificar_e_notificar()
