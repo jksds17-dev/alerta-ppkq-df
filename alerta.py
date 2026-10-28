@@ -4,7 +4,7 @@ import json
 import re
 import os
 
-WEBHOOK_URL = 'https://discord.com/api/webhooks/1564227542754263131/Z0tmoKFVN7JHaidxn0SJLv09q3fTPiNbcbC8VRQHga1ul2mhLgPEJfZmAyl_592wDn8T'
+WEBHOOK_URL = 'https://discord.com/api/webhooks/1564815438918189186/KI-m0yCtznwD4ht8V9YmM_58js1m7LFLR4h3ngLBB7Cz9Nfw5VEPhmt73KHDh3OtwJaG'
 ESTADO_FILE = 'estado_boss.json'
 
 # Coordenadas Exatas das Bases (Calibradas)
